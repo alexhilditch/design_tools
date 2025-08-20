@@ -8,7 +8,7 @@ from Bio.PDB.Chain import Chain
 from Bio.PDB.SASA import ShrakeRupley
 from Bio.SeqUtils import seq1
 
-from design_tools.common.common import expand
+from common.common import expand
 
 pdb_parser = PDBParser(QUIET=True)
 super_imposer = Superimposer()
