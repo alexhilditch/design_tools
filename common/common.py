@@ -9,6 +9,7 @@ Minimal functions
 import os
 import csv
 import glob
+import shutil
 from csv import DictWriter
 
 def make_directory(directory:str):
@@ -137,3 +138,50 @@ def expand(residues: list) -> list:
                 expanded.insert(idx, new_residue)
     
     return expanded
+
+def copy_files_from_dataframe(input_dataframe, column, output_directory, suffix=None, stop_if_not_found=True):
+    '''
+    A short function to copy all of the file paths from a column in an input dataframe to an output directory.
+
+    For instance to move pdb files from one file system to another
+
+    option to add a suffix to the file.
+
+    option to continue even if some files are not found.
+
+    '''
+
+    make_directory(output_directory)
+
+    num_files_moved = 0
+    num_files_skipped = 0
+    num_files_not_found = 0
+
+    file_paths = input_dataframe[column]
+    
+    for file in file_paths:
+
+        if stop_if_not_found == True:
+            assert os.path.isfile(file) == True, f'Error: file {file} not found.'
+
+        if suffix == None:
+            file_basename = os.path.basename(file)
+        else:
+            file_basename = os.path.basename(file).replace('.', f'_{suffix}_.')
+
+        output_path = os.path.join(output_directory, file_basename)
+
+        if os.path.isfile(output_path) == False:
+            try:
+                shutil.copyfile(file, output_path)
+                num_files_moved += 1
+            except FileNotFoundError:
+                num_files_not_found += 1
+                continue
+        else:
+            num_files_skipped += 1
+
+    print(f'Moved {num_files_moved} files to {output_directory}. Skipped {num_files_skipped} files (already exist)')
+    
+    if stop_if_not_found != True:
+        print(f'Moved {num_files_moved} files to {output_directory}. Skipped {num_files_skipped} files (already exist). {num_files_not_found} files not found.')
