@@ -7,10 +7,13 @@ from Bio.PDB import Superimposer
 from Bio.PDB.Chain import Chain
 from Bio.PDB.SASA import ShrakeRupley
 from Bio.SeqUtils import seq1
+from Bio.PDB.Selection import unfold_entities
+from Bio.PDB import NeighborSearch
 
 from common.common import expand
 
 pdb_parser = PDBParser(QUIET=True)
+mmcif_parser = MMCIFParser(QUIET=True)
 super_imposer = Superimposer()
 pdb_io = PDBIO()
 
@@ -138,14 +141,10 @@ def align_pdbs(ref_model, sample_model, residues:list=[], ref_residues:list=[],
         print(f'ERROR: align_pdbs() mode must be "CA" or "ALL_ATOM"! You provided "{mode}"')
         return None
 
-    if type(ref_model) != Bio.PDB.Model.Model or type(sample_model) != Bio.PDB.Model.Model:
-        pdb_parser = Bio.PDB.PDBParser(QUIET=True)    
     if type(ref_model) != Bio.PDB.Model.Model:
         ref_model = pdb_parser.get_structure("reference", ref_model)[0]
     if type(sample_model) != Bio.PDB.Model.Model:
         sample_model = pdb_parser.get_structure("sample", sample_model)[0]
-
-    super_imposer = Bio.PDB.Superimposer()
 
     if residues == []:
         align_all = True
@@ -218,3 +217,65 @@ def align_pdbs(ref_model, sample_model, residues:list=[], ref_residues:list=[],
         return rmsd, sample_model
     else:
         return rmsd
+
+def find_hbond_partners(model, to_atoms, cutoff=5, chain='A'):
+
+    if type(model) != Bio.PDB.Model.Model:
+        model = pdb_parser.get_structure("sample", model)[0]
+
+    structure_atoms = unfold_entities(model, chain)
+    ns = NeighborSearch(structure_atoms)
+
+    hbond_partners = []
+
+    for item in atoms:
+
+        close_atoms = ns.search(item.coord, cutoff)
+
+        for atom in close_atoms:
+            if atom.get_id() == 'OH':
+                res_id = f'{seq1(atom.get_parent().get_resname())}{atom.get_parent().id[1]}'
+                distance = atom - item
+                tmp_dict = {res_id: distance}
+                hbond_partners.append(tmp_dict)
+
+            elif atom.get_id() == 'OG':
+                res_id = f'{seq1(atom.get_parent().get_resname())}{atom.get_parent().id[1]}'
+                distance = atom - item
+                tmp_dict = {res_id: distance}
+                hbond_partners.append(tmp_dict)
+
+    return hbond_partners
+
+
+def get_ligand_atoms(model, ligand_name):
+
+    if type(model) != Bio.PDB.Model.Model:
+        model = pdb_parser.get_structure("sample", model)[0]
+
+    ligand_atoms = []
+
+    for chain in model.get_chains():
+        for residue in chain:
+            if residue.resname == ligand_name:
+                for atom in residue:
+                    ligand_atoms.append(atom)
+
+    return ligand_atoms
+
+def get_ligand_coords(model, ligand_name):
+
+    if type(model) != Bio.PDB.Model.Model:
+        model = pdb_parser.get_structure("sample", model)[0]
+
+    ligand_coords = []
+
+    for chain in model.get_chains():
+        for residue in chain:
+            if residue.resname == ligand_name:
+                for atom in residue:
+                    ligand_coords.append(atom.get_coord())
+    
+    ligand_coords = np.array(ligand_coords)
+
+    return ligand_coords
