@@ -9,6 +9,29 @@ from common.common import make_directory
 
 def check_af3_completion(input_directory, output_directory, delete_unrecognised=False):
 
+    '''
+    A function to check which of the input json files have been completed
+
+    input directory is the top level input directory - this can contain several sub directories
+    is the job has been split up
+
+    the output directory is a single directory, where every sub directory is a prediction
+    i.e., all input directories must point to a single output directory.
+
+    if the job has been begun but not completed the directory will be made, but the ranking_scores.csv
+    file not made. This will be added as a partial completion.
+
+    If there is a directory in the output directory that does not match an input json (this happens most 
+    frequently if one of the predictions has been duplicated, and a unique timestamp appended to the directory
+    name), it will be added as unrecognised, and can be optionally deleted to not interfere with scoring.
+    (delete_unrecognised = True)
+
+    Care must be taken that the output directory does not contain any subfolders that should not be deleted, as
+    these will be identified as unrecognised.
+
+    returns: complete, partially_complete, incomplete, unrecognised
+    '''
+
     jsons = glob.glob(f'{input_directory}/**/*.json', recursive=True)
     input_job_names = [os.path.basename(x).split('.json')[0] for x in jsons]
 
@@ -58,6 +81,24 @@ def collect_af3_scores(scores_directory):
 
     '''
     A function to collect all af3 scores from the output directory
+
+    The expected input is the output directory from af3 - each sub directory in this directory is a prediction
+
+    This function collects some basic scores from the af3 output
+
+    Note there are 4 possible molecule types - protein, ligand, dna, and rna
+
+    Returns the per chain plddt, and the plddt by molecule type (i.e., the average protein plddt)
+
+    Scores returned:
+
+    ID
+    top model path
+    Sequence (by chain - if protein, dna, or rna)
+    plddt (by chain)
+    plddt (by molecule type)
+    iptm
+    ptm
 
     returns a pandas dataframe
     '''
@@ -161,6 +202,21 @@ def collect_af3_scores(scores_directory):
 
 def restart_af3_predictions(input_directory, output_directory, complete, partially_complete, task_file, num_dirs=1):
 
+    '''
+    A function to redistribute af3 jsons to restart predictions.
+    
+    Inputs:
+    input_directory: the top level input directory - will be subdivided later
+    output_directory: the output directory, all jobs will point to this directory
+    complete: the list of already completed predictions from the input (this will be moved to a new 'complete' directory)
+    partially_complete: the list of partially completed precitions (the partial prediction will be deleted)
+    task_file: the task file to submitting the new job
+    num_dirs: the number of subdirectories to divide the job into
+    
+    outputs:
+    none, but writes the task file
+    '''
+
     completed_dir = os.path.join(input_directory, 'complete')
     make_directory(completed_dir)
 
@@ -215,7 +271,7 @@ def restart_af3_predictions(input_directory, output_directory, complete, partial
     for i in range(1, num_directories+1):
         sub_dir = f'{input_directory}/input_{i}'
         
-        create_dir(sub_dir)
+        make_directory(sub_dir)
 
         start_num = int((i * (num_jsons_remaining/num_directories)) - (num_jsons_remaining/num_directories))
         end_num = int(i * (num_jsons_remaining/num_directories))
