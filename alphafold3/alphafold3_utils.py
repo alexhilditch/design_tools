@@ -5,6 +5,7 @@ import glob
 import pandas as pd
 import json
 import numpy as np
+from tqdm import tqdm
 from common.common import make_directory
 
 def check_af3_completion(input_directory, output_directory, delete_unrecognised=False):
@@ -104,8 +105,13 @@ def collect_af3_scores(scores_directory):
     '''
 
     out = {}
+    failed = []
 
-    for element in os.listdir(scores_directory):
+    num_predictions = len(os.listdir(scores_directory))
+
+    print(f'Parsing {num_predictions} predictions')
+
+    for element in tqdm(os.listdir(scores_directory)):
         directory = os.path.join(scores_directory, element)
 
         if os.path.isdir(directory):
@@ -115,12 +121,16 @@ def collect_af3_scores(scores_directory):
             summary = os.path.join(directory, element + '_summary_confidences.json')
             details = os.path.join(directory, element + '_confidences.json')
 
-            with open(data, 'r') as fobj:
-                meta_data = json.load(fobj)
-            with open(summary, 'r') as fobj:
-                summary_data = json.load(fobj)
-            with open(details, 'r') as fobj:
-                detail_data = json.load(fobj)
+            try:
+                with open(data, 'r') as fobj:
+                    meta_data = json.load(fobj)
+                with open(summary, 'r') as fobj:
+                    summary_data = json.load(fobj)
+                with open(details, 'r') as fobj:
+                    detail_data = json.load(fobj)
+            except FileNotFoundError:
+                failed.append(element)
+                continue
 
             # get some basic information
             id = meta_data['name']
@@ -197,6 +207,13 @@ def collect_af3_scores(scores_directory):
             out[id]['ptm'] = summary_data['ptm']
 
     df = pd.DataFrame().from_dict(out, orient='index').reset_index().rename(columns={"index": "id"})
+
+    print(f'Collected scores for {len(df)} predictions\n')
+
+    if len(failed) != 0:
+        print(f'{len(failed)} predictions could not be loaded')
+        print(f'Failed predictions:')
+        print(failed)
 
     return df
 
