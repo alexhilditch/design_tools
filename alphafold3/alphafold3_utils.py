@@ -5,13 +5,9 @@ import glob
 import pandas as pd
 import json
 import numpy as np
+from common.common import make_directory
 
-def check_af3_completion(input_directory, output_directory):
-    '''
-    check which jsons have been completed
-
-    returns complete, partially_complete, and incomplete lists
-    '''
+def check_af3_completion(input_directory, output_directory, delete_unrecognised=False):
 
     jsons = glob.glob(f'{input_directory}/**/*.json', recursive=True)
     input_job_names = [os.path.basename(x).split('.json')[0] for x in jsons]
@@ -20,25 +16,43 @@ def check_af3_completion(input_directory, output_directory):
 
     complete = []
     partially_complete = []
+    unrecognised = []
 
     # iterate over all directories
     for folder in os.listdir(output_directory):
         job_name = os.path.basename(folder)
-        # prediction complete if ranking was done
-        if f'{job_name}_ranking_scores.csv' in os.listdir(os.path.join(output_directory, folder)):
-            complete.append(job_name)
-        elif f'{job_name}_ranking_scores.csv' not in os.listdir(os.path.join(output_directory, folder)):
-            partially_complete.append(job_name)
+        if job_name not in input_job_names:
+            unrecognised.append(job_name)
+        else:
+            # prediction complete if ranking was done
+            if f'{job_name}_ranking_scores.csv' in os.listdir(os.path.join(output_directory, folder)):
+                complete.append(job_name)
+            elif f'{job_name}_ranking_scores.csv' not in os.listdir(os.path.join(output_directory, folder)):
+                partially_complete.append(job_name)
     
     incomplete = [x for x in input_job_names if x not in complete and x not in partially_complete]
 
     num_completed = len(complete)
     num_partially_completed = len(partially_complete)
     num_incomplete = len(incomplete)
+    num_unrecognised = len(unrecognised)
 
-    print(f'Found {num_jsons} json files in input directory. \n{num_completed} predictions have been completed. \n{num_partially_completed} predictions are partially complete. \nThere are {num_incomplete} incomplete predictions.')
+    print(f'Found {num_jsons} json files in input directory: {input_directory}. \n')
+    print(f'{num_completed} predictions have been completed.')
+    print(f'{num_partially_completed} predictions are partially complete')
+    print(f'There are {num_incomplete} incomplete predictions.')
+    print(f'There are {num_unrecognised} unrecognised predictions (matching json not found).\n')
 
-    return complete, partially_complete, incomplete
+    unrecognised_predictions_deleted = 0
+
+    if delete_unrecognised:
+        for file_name in unrecognised:
+            shutil.rmtree(f'{output_directory}/{file_name}')
+            unrecognised_predictions_deleted += 1
+
+        print(f'Deleted {unrecognised_predictions_deleted} unrecognised predictions.\n')
+
+    return complete, partially_complete, incomplete, unrecognised
 
 def collect_af3_scores(scores_directory):
 
@@ -144,3 +158,87 @@ def collect_af3_scores(scores_directory):
     df = pd.DataFrame().from_dict(out, orient='index').reset_index().rename(columns={"index": "id"})
 
     return df
+
+def restart_af3_predictions(input_directory, output_directory, complete, partially_complete, task_file, num_dirs=1):
+
+    completed_dir = os.path.join(input_directory, 'complete')
+    make_directory(completed_dir)
+
+    jsons_moved = 0
+    jsons_skipped = 0
+    partial_predictions_deleted = 0
+    partial_predictions_skipped = 0
+
+    jsons = glob.glob(f'{input_directory}/**/*.json', recursive=True)
+
+    for file in jsons:
+        file_name = os.path.basename(file).split('.json')[0]
+        if file_name in complete:
+            new_path = f'{completed_dir}/{file_name}.json'
+            try:
+                shutil.move(file, new_path)
+                jsons_moved += 1
+            except FileNotFoundError:
+                jsons_skipped += 1
+                continue
+        elif file_name in partially_complete:
+            try:
+                shutil.rmtree(f'{output_directory}/{file_name}')
+                partial_predictions_deleted += 1
+            except FileNotFoundError:
+                partial_predictions_skipped += 1
+                continue
+
+    print(f'Moved {jsons_moved} json files to {completed_dir}')
+    print(f'Skipped {jsons_skipped} files (already moved or not found)')
+    print(f'{partial_predictions_deleted} partial predictions have been deleted')
+    print(f'{partial_predictions_skipped} partial predictions were skipped (already deleted or not found)')
+
+    task_lines = []
+
+    completed_jsons = glob.glob(f'{completed_dir}/**/*.json', recursive=True)
+    all_jsons = glob.glob(f'{input_directory}/**/*.json', recursive=True)
+
+    jsons_remaining = list(set(all_jsons) - set(completed_jsons))
+
+    num_jsons_remaining = len(jsons_remaining)
+
+    print(f'\nFound {num_jsons_remaining} json files remaining in {input_directory}')
+
+    files_moved = 0
+
+    # optional block to split the input directory into several smaller directories
+    num_directories = num_dirs
+
+    print(f'Splitting remaining json files into {num_directories} directories')
+
+    for i in range(1, num_directories+1):
+        sub_dir = f'{input_directory}/input_{i}'
+        
+        create_dir(sub_dir)
+
+        start_num = int((i * (num_jsons_remaining/num_directories)) - (num_jsons_remaining/num_directories))
+        end_num = int(i * (num_jsons_remaining/num_directories))
+
+        for k in range(start_num, end_num):
+            file = os.path.basename(jsons_remaining[k])
+            dest = sub_dir+'/'+file
+            shutil.move(jsons_remaining[k], dest)
+            files_moved += 1
+
+        line = (f'python /work/lpdi/users/dobbelst/tools/alphafold3/run_alphafold.py '
+                '--model_dir=\'/work/lpdi/users/dobbelst/tools/alphafold3\' '
+                '--db_dir=\'/work/lpdi/users/dobbelst/databases/alphafold3_dbs\' '
+                f'--input_dir=\'{sub_dir}\' '
+                f'--output_dir=\'{output_directory}\' '
+                '--run_data_pipeline=\'false\'\n'
+                )
+        
+        task_lines.append(line)
+
+    with open(task_file, 'a+') as f:
+        for line in task_lines:
+            f.write(line)
+
+    print(f'\nMoved {files_moved} files into {num_dirs} directories')
+    print(f'Wrote to task file {task_file}\n')
